@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Trello Tool Manager</title>
+  <script src="https://trellocdn.com"></script>
+</head>
+<body>
+  <script>
+    TrelloPowerUp.initialize({
+      'board-buttons': function(t, options) {
+        return [{
+          icon: 'https://hyperdev.com',
+          text: 'Print & Export Tool',
+          callback: function(t) {
+            return t.modal({
+              url: './interface.html',
+              height: 600,
+              title: 'Select Data to Print or Export'
+            });
+          }
+        }];
+      }
+    });
+  </script>
+</body>
+</html>
