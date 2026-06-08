@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Selector Interface</title>
+  <script src="https://trellocdn.com"></script>
+  <style>
+    body { font-family: sans-serif; padding: 15px; color: #172b4d; }
+    .actions { margin-bottom: 20px; display: flex; gap: 10px; }
+    button { background: #0079bf; color: white; border: none; padding: 8px 14px; border-radius: 3px; cursor: pointer; font-weight: bold; }
+    button.alt { background: #091e420f; color: #172b4d; }
+    .list-group { margin-bottom: 15px; border: 1px solid #e2e8f0; padding: 10px; border-radius: 5px; }
+    .card-item { margin-left: 25px; margin-top: 5px; font-size: 14px; }
+    
+    @media print {
+      body * { display: none; }
+      #print-workspace, #print-workspace * { display: block; }
+      .print-card { page-break-inside: avoid; border-bottom: 2px solid #ccc; padding: 15px 0; }
+      .print-meta { font-size: 12px; color: #555; margin-bottom: 8px; }
+      .print-section { margin-top: 10px; font-size: 14px; }
+    }
+  </style>
+</head>
+<body>
+
+  <div id="ui-container">
+    <div class="actions">
+      <button onclick="processOutput('pdf')">Print / Save PDF</button>
+      <button onclick="processOutput('csv')">Export to CSV</button>
+      <button class="alt" onclick="toggleAll(true)">Select All</button>
+      <button class="alt" onclick="toggleAll(false)">Clear All</button>
+    </div>
+    <div id="selection-tree">Loading board structural data...</div>
+  </div>
+
+  <div id="print-workspace" style="display:none;"></div>
+
+  <script>
+    var t = TrelloPowerUp.iframe();
+    var boardData = [];
+
+    t.render(function() {
+      return t.lists('all')
+        .then(function(lists) {
+          var promises = lists.map(function(list) {
+            return t.cards('id', 'name', 'desc', 'idList', 'attachments', 'comments', 'labels', 'due')
+              .then(function(allCards) {
+                var filteredCards = allCards.filter(c => c.idList === list.id);
+                return { id: list.id, name: list.name, cards: filteredCards };
+              });
+          });
+          return Promise.all(promises);
+        })
+        .then(function(completeData) {
+          boardData = completeData;
+          renderTree(completeData);
+        });
+    });
+
+    function renderTree(data) {
+      var html = '';
+      data.forEach((list, lIdx) => {
+        html += `<div class="list-group">
+          <label><strong><input type="checkbox" class="list-chk" data-lidx="${lIdx}" onchange="checkList(this)" checked> List: ${list.name}</strong></label>`;
+        list.cards.forEach((card, cIdx) => {
+          html += `<div class="card-item">
+            <label><input type="checkbox" class="card-chk" data-lidx="${lIdx}" data-cidx="${cIdx}" checked> ${card.name}</label>
+          </div>`;
+        });
+        html += `</div>`;
+      });
+      document.getElementById('selection-tree').innerHTML = html;
+    }
+
+    function checkList(el) {
+      var lIdx = el.getAttribute('data-lidx');
+      document.querySelectorAll(`.card-chk[data-lidx="${lIdx}"]`).forEach(chk => chk.checked = el.checked);
+    }
+
+    function toggleAll(status) {
+      document.querySelectorAll('input[type="checkbox"]').forEach(chk => chk.checked = status);
+    }
+
+    function getSelectedData() {
+      var activeData = [];
+      document.querySelectorAll('.list-group').forEach(group => {
+        var listChk = group.querySelector('.list-chk');
+        var lIdx = listChk.getAttribute('data-lidx');
+        var listCopy = { name: boardData[lIdx].name, cards: [] };
+        
+        group.querySelectorAll('.card-chk').forEach(cChk => {
+          if (cChk.checked) {
+            var cIdx = cChk.getAttribute('data-cidx');
+            listCopy.cards.push(boardData[lIdx].cards[cIdx]);
+          }
+        });
+        if (listCopy.cards.length > 0) activeData.push(listCopy);
+      });
+      return activeData;
+    }
+
+    function processOutput(mode) {
+      var selected = getSelectedData();
+      
+      if (mode === 'pdf') {
+        var printArea = document.getElementById('print-workspace');
+        var html = '';
+        selected.forEach(list => {
+          list.cards.forEach(card => {
+            var labelText = card.labels ? card.labels.map(l => l.name).join(', ') : '';
+            var cardNameWithDue = card.name + (card.due ? ` (Due: ${card.due.split('T')[0]})` : '');
+            var commentsText = card.comments ? card.comments.map(c => `<li>${c.text}</li>`).join('') : '';
+
+            html += `<div class="print-card">
+              <h2>${cardNameWithDue}</h2>
+              <div class="print-meta"><strong>List:</strong> ${list.name} ${labelText ? `| <strong>Labels:</strong> ${labelText}` : ''}</div>
+              <div class="print-section"><strong>Description:</strong><br>${card.desc || 'No description.'}</div>`;
+            if(commentsText) {
+              html += `<div class="print-section"><strong>Comments:</strong><ul>${commentsText}</ul></div>`;
+            }
+            html += `</div>`;
+          });
+        });
+        printArea.innerHTML = html;
+        window.print();
+      } 
+      
+      if (mode === 'csv') {
+        var csvRows = [['List Name', 'Card Name', 'Labels', 'Description', 'Comments']];
+        selected.forEach(list => {
+          list.cards.forEach(card => {
+            var finalCardName = card.name;
+            if (card.due) {
+              var cleanDate = card.due.split('T')[0]; 
+              finalCardName += ` (Due: ${cleanDate})`;
+            }
+
+            var labelStr = card.labels ? card.labels.map(l => l.name).join(' | ') : '';
+            var commentStr = card.comments ? card.comments.map(c => c.text).join('\n') : '';
+
+            var cleanList = list.name.replace(/"/g, '""');
+            var cleanName = finalCardName.replace(/"/g, '""');
+            var cleanLabels = labelStr.replace(/"/g, '""');
+            var cleanDesc = (card.desc || '').replace(/"/g, '""');
+            var cleanComments = commentStr.replace(/"/g, '""');
+
+            csvRows.push([`"${cleanList}"`, `"${cleanName}"`, `"${cleanLabels}"`, `"${cleanDesc}"`, `"${cleanComments}"`]);
+          });
+        });
+        
+        var csvContent = "data:text/csv;charset=utf-8,\uFEFF" + csvRows.map(e => e.join(",")).join("\n");
+        var encodedUri = encodeURI(csvContent);
+        var link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "trello_board_export.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+      }
+    }
+  </script>
+</body>
+</html>
